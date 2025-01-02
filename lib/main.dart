@@ -3,11 +3,16 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:image/image.dart' as img;
+import 'package:permission_handler/permission_handler.dart';
 
-void main() {
-  runApp(MyApp());
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  if (await Permission.storage.request().isGranted) {
+    runApp(MyApp());
+  } else {
+    // Handle permission denial
+  }
 }
-
 class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
@@ -28,6 +33,7 @@ class _HomePageState extends State<HomePage> {
   List<File> _selectedImages = [];
   bool _overwriteWithoutPrompt = false;
   bool _resizeInPlace = false;
+  bool _lockAspectRatio = true;
   int _minWidth = 1;
   int _minHeight = 1;
   int _maxWidth = 0;
@@ -112,45 +118,64 @@ class _HomePageState extends State<HomePage> {
         return AlertDialog(
           title: Text('Resize Images'),
           content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text('Width: ${width.toInt()}'),
-                Slider(
-                  value: width,
-                  min: _minWidth.toDouble(),
-                  max: _maxWidth.toDouble(),
-                  divisions: _maxWidth - _minWidth,
-                  label: width.toInt().toString(),
-                  onChanged: (value) {
-                    setState(() {
-                      width = value;
-                    });
-                  },
-                ),
-                Text('Height: ${height.toInt()}'),
-                Slider(
-                  value: height,
-                  min: _minHeight.toDouble(),
-                  max: _maxHeight.toDouble(),
-                  divisions: _maxHeight - _minHeight,
-                  label: height.toInt().toString(),
-                  onChanged: (value) {
-                    setState(() {
-                      height = value;
-                    });
-                  },
-                ),
-                CheckboxListTile(
-                  title: Text('Resize In Place'),
-                  value: _resizeInPlace,
-                  onChanged: (value) {
-                    setState(() {
-                      _resizeInPlace = value ?? false;
-                    });
-                  },
-                ),
-              ],
+            child: StatefulBuilder(
+              builder: (BuildContext context, StateSetter setState) {
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text('Width: ${width.toInt()}'),
+                    Slider(
+                      value: width,
+                      min: _minWidth.toDouble(),
+                      max: _maxWidth.toDouble(),
+                      divisions: _maxWidth - _minWidth,
+                      label: width.toInt().toString(),
+                      onChanged: (value) {
+                        setState(() {
+                          width = value;
+                          if (_lockAspectRatio) {
+                            height = (value / _maxWidth) * _maxHeight;
+                          }
+                        });
+                      },
+                    ),
+                    Text('Height: ${height.toInt()}'),
+                    Slider(
+                      value: height,
+                      min: _minHeight.toDouble(),
+                      max: _maxHeight.toDouble(),
+                      divisions: _maxHeight - _minHeight,
+                      label: height.toInt().toString(),
+                      onChanged: (value) {
+                        setState(() {
+                          height = value;
+                          if (_lockAspectRatio) {
+                            width = (value / _maxHeight) * _maxWidth;
+                          }
+                        });
+                      },
+                    ),
+                    CheckboxListTile(
+                      title: Text('Resize In Place'),
+                      value: _resizeInPlace,
+                      onChanged: (value) {
+                        setState(() {
+                          _resizeInPlace = value ?? false;
+                        });
+                      },
+                    ),
+                    CheckboxListTile(
+                      title: Text('Lock Aspect Ratio'),
+                      value: _lockAspectRatio,
+                      onChanged: (value) {
+                        setState(() {
+                          _lockAspectRatio = value ?? true;
+                        });
+                      },
+                    ),
+                  ],
+                );
+              },
             ),
           ),
           actions: [
@@ -172,6 +197,7 @@ class _HomePageState extends State<HomePage> {
       },
     );
   }
+
 
   Future<void> _processResize(int width, int height) async {
     for (var image in _selectedImages) {
