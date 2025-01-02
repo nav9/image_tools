@@ -27,6 +27,7 @@ class _HomePageState extends State<HomePage> {
   final ImagePicker _picker = ImagePicker();
   List<File> _selectedImages = [];
   bool _overwriteWithoutPrompt = false;
+  bool _resizeInPlace = false;
 
   void _pickImages() async {
     final List<XFile>? images = await _picker.pickMultiImage();
@@ -108,10 +109,10 @@ class _HomePageState extends State<HomePage> {
           actions: [
             CheckboxListTile(
               title: Text('Resize In Place'),
-              value: _overwriteWithoutPrompt,
+              value: _resizeInPlace,
               onChanged: (value) {
                 setState(() {
-                  _overwriteWithoutPrompt = value ?? false;
+                  _resizeInPlace = value ?? false;
                 });
               },
             ),
@@ -122,22 +123,25 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _processResize(List<int> resolution) async {
-    Directory appDir = await getApplicationDocumentsDirectory();
-    String outputDirPath = '${appDir.path}/AlteredPhotos';
-    Directory outputDir = Directory(outputDirPath);
-    if (!await outputDir.exists()) {
-      await outputDir.create(recursive: true);
-    }
-
     for (var image in _selectedImages) {
       final data = await image.readAsBytes();
       final decodedImage = img.decodeImage(data);
       if (decodedImage != null) {
         final resizedImage = img.copyResize(decodedImage, width: resolution[0], height: resolution[1]);
-        final newFileName = '${outputDir.path}/${image.uri.pathSegments.last}';
-        final newFile = File(newFileName);
-        if (!await newFile.exists() || _overwriteWithoutPrompt || await _confirmOverwrite()) {
-          await newFile.writeAsBytes(img.encodeJpg(resizedImage), flush: true);
+        if (_resizeInPlace) {
+          await image.writeAsBytes(img.encodeJpg(resizedImage), flush: true);
+        } else {
+          final directory = image.parent;
+          final outputDirPath = '${directory.path}/resizedImages';
+          Directory outputDir = Directory(outputDirPath);
+          if (!await outputDir.exists()) {
+            await outputDir.create(recursive: true);
+          }
+          final newFileName = '${outputDir.path}/${image.uri.pathSegments.last.split('.')[0]}_${resolution[0]}x${resolution[1]}.jpg';
+          final newFile = File(newFileName);
+          if (!await newFile.exists() || _overwriteWithoutPrompt || await _confirmOverwrite()) {
+            await newFile.writeAsBytes(img.encodeJpg(resizedImage), flush: true);
+          }
         }
       }
     }
@@ -154,6 +158,7 @@ class _HomePageState extends State<HomePage> {
       'BMP': 'bmp',
       'GIF': 'gif',
       'TIFF': 'tiff',
+      'WEBP': 'webp',
     };
 
     showDialog(
@@ -179,17 +184,16 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _processFormatConversion(String format) async {
-    Directory appDir = await getApplicationDocumentsDirectory();
-    String outputDirPath = '${appDir.path}/AlteredPhotos';
-    Directory outputDir = Directory(outputDirPath);
-    if (!await outputDir.exists()) {
-      await outputDir.create(recursive: true);
-    }
-
     for (var image in _selectedImages) {
       final data = await image.readAsBytes();
       final decodedImage = img.decodeImage(data);
       if (decodedImage != null) {
+        final directory = image.parent;
+        final outputDirPath = '${directory.path}/convertedImages';
+        Directory outputDir = Directory(outputDirPath);
+        if (!await outputDir.exists()) {
+          await outputDir.create(recursive: true);
+        }
         final newFileName = '${outputDir.path}/${image.uri.pathSegments.last.split('.')[0]}.$format';
         final newFile = File(newFileName);
         if (!await newFile.exists() || _overwriteWithoutPrompt || await _confirmOverwrite()) {
@@ -209,6 +213,9 @@ class _HomePageState extends State<HomePage> {
               break;
             case 'tiff':
               encodedData = img.encodeTiff(decodedImage);
+              break;
+            case 'webp':
+              encodedData = img.encodeWebP(decodedImage);
               break;
           }
           if (encodedData != null) {
