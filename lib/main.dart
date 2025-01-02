@@ -28,6 +28,10 @@ class _HomePageState extends State<HomePage> {
   List<File> _selectedImages = [];
   bool _overwriteWithoutPrompt = false;
   bool _resizeInPlace = false;
+  int _minWidth = 1;
+  int _minHeight = 1;
+  int _maxWidth = 0;
+  int _maxHeight = 0;
 
   void _pickImages() async {
     final List<XFile>? images = await _picker.pickMultiImage();
@@ -35,7 +39,19 @@ class _HomePageState extends State<HomePage> {
       setState(() {
         _selectedImages = images.map((e) => File(e.path)).toList();
       });
+      _determineMaxDimensions();
       _showOptionsDialog();
+    }
+  }
+
+  void _determineMaxDimensions() async {
+    for (var image in _selectedImages) {
+      final data = await image.readAsBytes();
+      final decodedImage = img.decodeImage(data);
+      if (decodedImage != null) {
+        _maxWidth = _maxWidth < decodedImage.width ? decodedImage.width : _maxWidth;
+        _maxHeight = _maxHeight < decodedImage.height ? decodedImage.height : _maxHeight;
+      }
     }
   }
 
@@ -45,22 +61,24 @@ class _HomePageState extends State<HomePage> {
       builder: (context) {
         return AlertDialog(
           title: Text('Select an Option'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                title: Text('Remove Metadata'),
-                onTap: _removeMetadata,
-              ),
-              ListTile(
-                title: Text('Resize Images'),
-                onTap: _resizeImages,
-              ),
-              ListTile(
-                title: Text('Convert Image Format'),
-                onTap: _convertImageFormat,
-              ),
-            ],
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  title: Text('Remove Metadata'),
+                  onTap: _removeMetadata,
+                ),
+                ListTile(
+                  title: Text('Resize Images'),
+                  onTap: _resizeImages,
+                ),
+                ListTile(
+                  title: Text('Convert Image Format'),
+                  onTap: _convertImageFormat,
+                ),
+              ],
+            ),
           ),
         );
       },
@@ -84,37 +102,70 @@ class _HomePageState extends State<HomePage> {
 
   void _resizeImages() async {
     Navigator.pop(context);
-    final resolutions = {
-      '640x480': [640, 480],
-      '1024x768': [1024, 768],
-    };
+
+    double width = _maxWidth.toDouble();
+    double height = _maxHeight.toDouble();
 
     showDialog(
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: Text('Choose Resolution'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: resolutions.keys.map((key) {
-              return ListTile(
-                title: Text(key),
-                onTap: () async {
-                  await _processResize(resolutions[key]!);
-                  Navigator.pop(context);
-                },
-              );
-            }).toList(),
+          title: Text('Resize Images'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('Width: ${width.toInt()}'),
+                Slider(
+                  value: width,
+                  min: _minWidth.toDouble(),
+                  max: _maxWidth.toDouble(),
+                  divisions: _maxWidth - _minWidth,
+                  label: width.toInt().toString(),
+                  onChanged: (value) {
+                    setState(() {
+                      width = value;
+                    });
+                  },
+                ),
+                Text('Height: ${height.toInt()}'),
+                Slider(
+                  value: height,
+                  min: _minHeight.toDouble(),
+                  max: _maxHeight.toDouble(),
+                  divisions: _maxHeight - _minHeight,
+                  label: height.toInt().toString(),
+                  onChanged: (value) {
+                    setState(() {
+                      height = value;
+                    });
+                  },
+                ),
+                CheckboxListTile(
+                  title: Text('Resize In Place'),
+                  value: _resizeInPlace,
+                  onChanged: (value) {
+                    setState(() {
+                      _resizeInPlace = value ?? false;
+                    });
+                  },
+                ),
+              ],
+            ),
           ),
           actions: [
-            CheckboxListTile(
-              title: Text('Resize In Place'),
-              value: _resizeInPlace,
-              onChanged: (value) {
-                setState(() {
-                  _resizeInPlace = value ?? false;
-                });
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
               },
+              child: Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () async {
+                await _processResize(width.toInt(), height.toInt());
+                Navigator.pop(context);
+              },
+              child: Text('Resize'),
             ),
           ],
         );
@@ -122,12 +173,12 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Future<void> _processResize(List<int> resolution) async {
+  Future<void> _processResize(int width, int height) async {
     for (var image in _selectedImages) {
       final data = await image.readAsBytes();
       final decodedImage = img.decodeImage(data);
       if (decodedImage != null) {
-        final resizedImage = img.copyResize(decodedImage, width: resolution[0], height: resolution[1]);
+        final resizedImage = img.copyResize(decodedImage, width: width, height: height);
         if (_resizeInPlace) {
           await image.writeAsBytes(img.encodeJpg(resizedImage), flush: true);
         } else {
@@ -137,7 +188,7 @@ class _HomePageState extends State<HomePage> {
           if (!await outputDir.exists()) {
             await outputDir.create(recursive: true);
           }
-          final newFileName = '${outputDir.path}/${image.uri.pathSegments.last.split('.')[0]}_${resolution[0]}x${resolution[1]}.jpg';
+          final newFileName = '${outputDir.path}/${image.uri.pathSegments.last.split('.')[0]}_${width}x${height}.jpg';
           final newFile = File(newFileName);
           if (!await newFile.exists() || _overwriteWithoutPrompt || await _confirmOverwrite()) {
             await newFile.writeAsBytes(img.encodeJpg(resizedImage), flush: true);
@@ -158,7 +209,10 @@ class _HomePageState extends State<HomePage> {
       'BMP': 'bmp',
       'GIF': 'gif',
       'TIFF': 'tiff',
-      'WEBP': 'webp',
+      'ICO': 'ico',
+      'PSD': 'psd',
+      'TGA': 'tga',
+      'PNM': 'pnm',
     };
 
     showDialog(
@@ -166,17 +220,19 @@ class _HomePageState extends State<HomePage> {
       builder: (context) {
         return AlertDialog(
           title: Text('Choose Format'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: formats.keys.map((key) {
-              return ListTile(
-                title: Text(key),
-                onTap: () async {
-                  await _processFormatConversion(formats[key]!);
-                  Navigator.pop(context);
-                },
-              );
-            }).toList(),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: formats.keys.map((key) {
+                return ListTile(
+                  title: Text(key),
+                  onTap: () async {
+                    await _processFormatConversion(formats[key]!);
+                    Navigator.pop(context);
+                  },
+                );
+              }).toList(),
+            ),
           ),
         );
       },
@@ -214,9 +270,11 @@ class _HomePageState extends State<HomePage> {
             case 'tiff':
               encodedData = img.encodeTiff(decodedImage);
               break;
-            case 'webp':
-              encodedData = img.encodeWebP(decodedImage);
-              break;
+            default:
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('Unsupported format: $format')),
+              );
+              continue;
           }
           if (encodedData != null) {
             await newFile.writeAsBytes(encodedData, flush: true);
@@ -263,10 +321,12 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: Text('Image Processor')),
-      body: Center(
-        child: ElevatedButton(
-          onPressed: _pickImages,
-          child: Text('Select Images'),
+      body: Scrollbar(
+        child: Center(
+          child: ElevatedButton(
+            onPressed: _pickImages,
+            child: Text('Select Images'),
+          ),
         ),
       ),
     );
